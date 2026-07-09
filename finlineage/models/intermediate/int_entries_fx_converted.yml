@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: int_entries_fx_converted
+    description: |
+      All GL entries converted to INR (the reporting currency).
+      Every entry carries its original source_amount + source_currency AND
+      the converted amount_inr + fx_rate that produced it — making the
+      conversion fully auditable and reversible.
+    columns:
+      - name: entry_id
+        description: "Unique GL entry identifier (carried from stg_erp_gl_entries)"
+        tests:
+          - unique
+          - not_null
+      - name: entry_date
+        tests:
+          - not_null
+      - name: source_currency
+        description: "The original currency of the GL entry"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['INR', 'USD', 'EUR', 'GBP', 'AED']
+      - name: source_amount
+        tests:
+          - not_null
+      - name: fx_rate
+        description: "FX rate applied (1.0 for INR entries; date-matched rate for others)"
+        tests:
+          - not_null
+      - name: amount_inr
+        description: "Entry amount converted to INR using fx_rate"
+        tests:
+          - not_null
+      - name: reporting_currency
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['INR']

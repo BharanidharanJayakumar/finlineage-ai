@@ -1,0 +1,58 @@
+version: 2
+
+models:
+  - name: int_entries_cost_centre_mapped
+    description: |
+      FX-converted GL entries enriched with governed project and cost-centre
+      dimension data. Orphan entries (those referencing unknown projects or
+      cost centres) are flagged via is_orphan_* booleans rather than filtered out —
+      preserving the auditability requirement that no entry is silently dropped.
+    columns:
+      - name: entry_id
+        tests:
+          - unique
+          - not_null
+      - name: entry_date
+        tests:
+          - not_null
+      - name: project_code
+        description: "Project code from the GL entry"
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_projects')
+                field: project_code
+      - name: cost_centre
+        description: "Cost centre from the GL entry"
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_cost_centres')
+                field: cost_centre
+      - name: amount_inr
+        tests:
+          - not_null
+      - name: is_orphan_project
+        tests:
+          - not_null
+      - name: is_orphan_cost_centre
+        tests:
+          - not_null
+
+seeds:
+  - name: dim_cost_centres
+    description: "Governed cost-centre dimension. One row per Psiog delivery centre."
+    columns:
+      - name: cost_centre
+        tests:
+          - unique
+          - not_null
+  - name: dim_projects
+    description: "Governed project dimension. One row per client engagement."
+    columns:
+      - name: project_code
+        tests:
+          - unique
+          - not_null

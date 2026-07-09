@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: stg_payroll_entries
+    description: "Cleaned payroll allocations. One row per employee-project-day cost posting."
+    columns:
+      - name: allocation_id
+        description: "Unique payroll allocation identifier"
+        tests:
+          - unique
+          - not_null
+      - name: allocation_date
+        tests:
+          - not_null
+      - name: employee_id
+        tests:
+          - not_null
+      - name: project_code
+        tests:
+          - not_null
+      - name: hours_logged
+        tests:
+          - not_null
+      - name: cost_inr
+        tests:
+          - not_null

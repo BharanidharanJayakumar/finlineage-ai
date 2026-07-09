@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: stg_erp_gl_entries
+    description: "Cleaned, typed GL entries. One row per posting from the simulated ERP."
+    columns:
+      - name: entry_id
+        description: "Unique GL entry identifier"
+        tests:
+          - unique
+          - not_null
+      - name: entry_date
+        description: "Date the entry was posted"
+        tests:
+          - not_null
+      - name: account_type
+        description: "Revenue / COGS / OpEx classification"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Revenue', 'COGS', 'OpEx']
+      - name: currency
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['INR', 'USD', 'EUR', 'GBP', 'AED']
+      - name: amount
+        tests:
+          - not_null

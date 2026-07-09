@@ -1,0 +1,24 @@
+version: 2
+
+models:
+  - name: mart_variance_analysis
+    description: |
+      Month-over-month variance analysis by segment. Surfaces revenue, gross margin,
+      and operating income variances with materiality flags (>10% swing).
+      Powers the Power BI Variance Analysis view.
+    columns:
+      - name: period_month
+        tests:
+          - not_null
+      - name: segment
+        tests:
+          - not_null
+      - name: revenue
+        tests:
+          - not_null
+      - name: operating_income
+        tests:
+          - not_null
+      - name: is_material_variance
+        tests:
+          - not_null

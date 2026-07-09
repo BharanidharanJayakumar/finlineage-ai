@@ -1,0 +1,35 @@
+version: '3.8'
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.10.4-python3.12
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    _AIRFLOW_DB_MIGRATE: 'true'
+    _AIRFLOW_WWW_USER_CREATE: 'true'
+    _AIRFLOW_WWW_USER_USERNAME: admin
+    _AIRFLOW_WWW_USER_PASSWORD: admin
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./data:/opt/airflow/project/data
+    - ./scripts:/opt/airflow/project/scripts
+    - ./ge:/opt/airflow/project/ge
+    - ./ai_chains:/opt/airflow/project/ai_chains
+    - ./finlineage:/opt/airflow/project/finlineage
+    - ./.env:/opt/airflow/project/.env
+
+services:
+  airflow-standalone:
+    <<: *airflow-common
+    command: standalone
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5

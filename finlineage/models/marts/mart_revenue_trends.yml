@@ -1,0 +1,23 @@
+version: 2
+
+models:
+  - name: mart_revenue_trends
+    description: |
+      Revenue by period, segment, and project with month-over-month change.
+      Powers the Power BI Revenue Trends view.
+    columns:
+      - name: period_month
+        tests:
+          - not_null
+      - name: segment
+        tests:
+          - not_null
+      - name: project_code
+        tests:
+          - not_null
+      - name: revenue_inr
+        tests:
+          - not_null
+      - name: entry_count
+        tests:
+          - not_null

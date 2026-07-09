@@ -1,0 +1,19 @@
+version: 2
+
+models:
+  - name: mart_metric_dictionary
+    description: |
+      Governed metric definitions — the single source of truth for every financial
+      measure. Referenced by AI narrative chains and Power BI tooltips.
+    columns:
+      - name: metric_key
+        description: "Unique metric identifier"
+        tests:
+          - unique
+          - not_null
+      - name: metric_name
+        tests:
+          - not_null
+      - name: calculation_logic
+        tests:
+          - not_null

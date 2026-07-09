@@ -1,0 +1,33 @@
+version: 2
+
+models:
+  - name: stg_fx_rates
+    description: "Daily FX rates with INR as the target reporting currency."
+    columns:
+      - name: rate_date
+        tests:
+          - not_null
+      - name: from_currency
+        description: "Source currency"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['USD', 'EUR', 'GBP', 'AED']
+      - name: to_currency
+        description: "Target currency (always INR)"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['INR']
+      - name: rate
+        tests:
+          - not_null
+
+    # Composite uniqueness: one rate per date+currency pair
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - rate_date
+            - from_currency

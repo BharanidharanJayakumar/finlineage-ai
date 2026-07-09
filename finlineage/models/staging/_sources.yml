@@ -1,0 +1,52 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: "Raw landed data from simulated source systems (CSV files in data/bronze/)"
+    meta:
+      external_location: "read_csv_auto('C:/Users/bharanidharan.jayaku/Documents/Psiddhi/finlineage-ai/data/bronze/{name}.csv', header=true)"
+    tables:
+      - name: erp_gl_entries
+        description: "Project-billing general ledger transactions from the simulated ERP"
+        columns:
+          - name: entry_id
+            description: "Unique GL entry identifier"
+            tests:
+              - unique
+              - not_null
+          - name: entry_date
+            description: "Date the entry was posted"
+            tests:
+              - not_null
+          - name: amount
+            description: "Entry amount in the entry's currency"
+            tests:
+              - not_null
+
+      - name: payroll_entries
+        description: "Employee cost allocations to projects from the simulated payroll system"
+        columns:
+          - name: allocation_id
+            description: "Unique payroll allocation identifier"
+            tests:
+              - unique
+              - not_null
+          - name: allocation_date
+            tests:
+              - not_null
+          - name: employee_id
+            tests:
+              - not_null
+
+      - name: fx_rates
+        description: "Daily FX rates with INR as the target reporting currency"
+        columns:
+          - name: rate_date
+            tests:
+              - not_null
+          - name: from_currency
+            tests:
+              - not_null
+          - name: rate
+            tests:
+              - not_null

@@ -1,0 +1,73 @@
+name: FinLineage CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  dbt-build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install dbt-core dbt-duckdb duckdb great-expectations pandas python-dotenv
+
+      - name: Install dbt packages
+        run: |
+          cd finlineage
+          dbt deps
+
+      - name: Generate source data
+        run: python scripts/generate_sources.py
+
+      - name: Create dbt profiles
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << 'EOF'
+          finlineage:
+            target: ci
+            outputs:
+              ci:
+                type: duckdb
+                path: '${{ github.workspace }}/data/finlineage.duckdb'
+                threads: 4
+          EOF
+
+      - name: dbt build (seeds + models + tests)
+        run: |
+          cd finlineage
+          dbt build
+
+      - name: Run GE pre-gates
+        run: |
+          python ge/g1_raw_gl_completeness.py
+          python ge/g2_fx_rate_coverage.py
+          python ge/g3_payroll_completeness.py
+
+      - name: Run GE post-gates
+        run: |
+          python ge/g4_pnl_aggregation_consistency.py
+          python ge/g5_cross_mart_consistency.py
+
+      - name: Verify P&L reconciliation
+        run: |
+          python -c "
+          import duckdb
+          conn = duckdb.connect('data/finlineage.duckdb', read_only=True)
+          src = conn.execute('SELECT ROUND(SUM(amount_inr),2) FROM main.int_entries_cost_centre_mapped').fetchone()[0]
+          mrt = conn.execute('SELECT ROUND(SUM(revenue+cogs+opex),2) FROM main.mart_pnl_summary').fetchone()[0]
+          diff = abs(src - mrt)
+          print(f'Source: {src:,.2f}  Mart: {mrt:,.2f}  Diff: {diff:.2f}')
+          assert diff < 0.01, f'RECONCILIATION FAILED: diff={diff}'
+          print('RECONCILIATION PASSED')
+          "
+          

@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: mart_pnl_summary
+    description: |
+      Governed P&L summary by period and segment. One row per (month, segment).
+      All amounts in INR. Powers the Power BI P&L Summary view.
+    columns:
+      - name: period_month
+        tests:
+          - not_null
+      - name: segment
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Enterprise', 'MidMarket', 'Internal']
+      - name: revenue
+        tests:
+          - not_null
+      - name: cogs
+        tests:
+          - not_null
+      - name: gross_margin
+        tests:
+          - not_null
+      - name: opex
+        tests:
+          - not_null
+      - name: operating_income
+        tests:
+          - not_null
+      - name: entry_count
+        tests:
+          - not_null

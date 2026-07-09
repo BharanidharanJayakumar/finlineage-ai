@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: mart_cost_analysis
+    description: |
+      Cost breakdown by period, segment, cost centre, and account type.
+      COGS and OpEx amounts shown as positive values for intuitive reporting.
+      Powers the Power BI Cost Analysis view.
+    columns:
+      - name: period_month
+        tests:
+          - not_null
+      - name: segment
+        tests:
+          - not_null
+      - name: cost_centre
+        tests:
+          - not_null
+      - name: account_type
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['COGS', 'OpEx']
+      - name: cost_inr
+        tests:
+          - not_null
+      - name: entry_count
+        tests:
+          - not_null

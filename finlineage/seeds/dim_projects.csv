@@ -1,0 +1,7 @@
+project_code,project_name,segment,billing_currency,client_name
+P-1001,SLB-OFM-Web,Enterprise,USD,Schlumberger
+P-1002,HAL-DWP-Phase2,Enterprise,USD,Halliburton
+P-1003,MidMarket-Sales,MidMarket,INR,Generic MidMarket Client
+P-1004,EU-Banking-Client,Enterprise,EUR,EU Banking Corp
+P-1005,Internal-RnD,Internal,INR,Psiog Internal
+P-1006,APAC-Logistics,MidMarket,AED,APAC Logistics Group
