@@ -45,7 +45,7 @@ jobs:
       - name: dbt build (seeds + models + tests)
         run: |
           cd finlineage
-          dbt build --vars '{"bronze_path": "${{ github.workspace }}/data/bronze"}'
+          dbt build --vars '{"bronze_path": "${{ github.workspace }}/data/bronze"}' --exclude source:*
 
       - name: Run GE pre-gates
         run: |

@@ -89,7 +89,7 @@ def run_ai1():
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         temperature=0.3,
-        max_output_tokens=1500,
+        max_output_tokens=4096,
     )
 
     chain = PROMPT | llm | StrOutputParser()
