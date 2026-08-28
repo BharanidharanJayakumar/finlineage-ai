@@ -1,9 +1,14 @@
 """
-AI-1 — P&L Narrative Generation (Gemini 2.5 Flash)
+AI-1 — P&L Narrative Generation (Gemini 2.5 Flash, via LiteLLM gateway)
 Reads mart_pnl_summary from DuckDB, sends it to Gemini, gets back
 plain-English management commentary suitable for a board report.
+
+Phase 2, Wk 14: this call now goes through the LiteLLM gateway (Layer 8) instead
+of the Gemini SDK directly — see litellm_config.yaml for the "finlineage-narrative"
+alias, its Groq fallback, and response caching.
 """
 
+import os
 import sys
 import json
 from pathlib import Path
@@ -12,11 +17,14 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import duckdb
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "finlineage.duckdb"
+
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
+LITELLM_MASTER_KEY = os.getenv("LITELLM_MASTER_KEY", "sk-finlineage-local-dev")
 
 
 def get_pnl_data():
@@ -84,12 +92,14 @@ def run_ai1():
 
     print(f"  Data: {len(pnl_df)} rows from mart_pnl_summary")
     print(f"  Metrics: {len(metrics)} governed definitions loaded")
-    print(f"  Calling Gemini...\n")
+    print(f"  Calling Gemini via LiteLLM gateway ({LITELLM_BASE_URL})...\n")
 
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+    llm = ChatOpenAI(
+        model="finlineage-narrative",
+        base_url=LITELLM_BASE_URL,
+        api_key=LITELLM_MASTER_KEY,
         temperature=0.3,
-        max_output_tokens=4096,
+        max_tokens=4096,
     )
 
     chain = PROMPT | llm | StrOutputParser()

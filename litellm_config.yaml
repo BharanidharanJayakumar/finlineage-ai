@@ -1,0 +1,77 @@
+# LiteLLM Gateway config — Layer 8 (Phase 2, Wk 14)
+#
+# All 5 AI chains call Gemini/Groq through this one proxy instead of the provider
+# SDKs directly. Gets virtual keys, budgets, automatic fallback, response caching,
+# and one log format for free, at ₹0 added cost (LiteLLM + Redis are both OSS).
+#
+# POC note: this is a single docker-compose service with no Postgres behind it, so
+# "virtual keys" here means a single shared LITELLM_MASTER_KEY (set in .env) rather
+# than per-team DB-backed keys — budgets/fallback/caching all still work without a DB.
+
+model_list:
+  # AI-1 (narrative) and AI-3 (judge) — Gemini 2.5 Flash, free tier 10 RPM / 250 RPD.
+  - model_name: finlineage-narrative
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+      temperature: 0.3
+      max_tokens: 4096
+    model_info:
+      id: finlineage-narrative
+
+  # Fallback target when Gemini free-tier rate limit is hit mid-DAG — Groq instead
+  # of failing the AI-1/AI-3 task outright.
+  - model_name: finlineage-narrative-fallback
+    litellm_params:
+      model: groq/llama-3.3-70b-versatile
+      api_key: os.environ/GROQ_API_KEY
+      temperature: 0.3
+      max_tokens: 4096
+    model_info:
+      id: finlineage-narrative-fallback
+
+  # AI-2 (transformation docs) — Groq Llama 3.3 70B, free tier 30 RPM / 1,000 RPD.
+  - model_name: finlineage-docs
+    litellm_params:
+      model: groq/llama-3.3-70b-versatile
+      api_key: os.environ/GROQ_API_KEY
+      temperature: 0.2
+      max_tokens: 1000
+    model_info:
+      id: finlineage-docs
+
+  # AI-4 (variance tool-calling agent) — Gemini 2.5 Flash, low temperature for
+  # deterministic tool selection.
+  - model_name: finlineage-agent
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+      temperature: 0.1
+      max_tokens: 2048
+    model_info:
+      id: finlineage-agent
+
+litellm_settings:
+  # Gemini free tier is 10 RPM / 250 RPD — if AI-1/AI-3 hit that limit mid-DAG,
+  # fall back to Groq instead of failing the pipeline task.
+  fallbacks:
+    - finlineage-narrative: ["finlineage-narrative-fallback"]
+  num_retries: 2
+  request_timeout: 45
+
+  # Response cache — repeat calls (e.g. re-running a DAG task, or a reviewer
+  # re-opening a claim) don't re-spend free-tier quota for an identical prompt.
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+    ttl: 3600  # 1hr
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Every model above is a free-tier key — spend should always be exactly ₹0.
+  # This is a guardrail, not a real budget: it should trip if a provider ever
+  # starts billing for these calls.
+  max_budget: 0.0
+  budget_duration: 30d

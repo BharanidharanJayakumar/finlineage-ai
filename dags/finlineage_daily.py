@@ -4,9 +4,16 @@ Orchestrates the full E2E flow:
   1. GE pre-gates (G1, G2, G3) — block if raw data is bad
   2. dbt build (seeds + models + tests)
   3. GE post-gates (G4, G5) — block if aggregations don't reconcile
-  4. AI narrative generation (Gemini)
-  5. AI transformation docs (Groq)
-  6. AI-as-judge consistency check (Gemini)
+  4. AI narrative generation (Gemini, via LiteLLM gateway)
+  5. AI transformation docs (Groq, via LiteLLM gateway)
+  6. AI variance explanation agent (Gemini, tool-calling, via LiteLLM gateway) — Wk 14
+  7. AI-as-judge confidence scoring + HITL routing (Gemini, via LiteLLM gateway) — v2, Wk 14
+
+Phase 2, Wk 14: ai3 now runs ai3_narrative_judge_v2.py (confidence-scored HITL
+router) instead of v1's single PASS/FAIL verdict, and ai4 (variance agent) runs
+in parallel with ai1/ai2 since it only depends on the post-dbt marts, not on the
+narrative. All AI tasks call Gemini/Groq through the litellm-gateway service
+(Layer 8) rather than the provider SDKs directly.
 """
 
 from datetime import datetime, timedelta
@@ -76,7 +83,7 @@ with DAG(
         bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ge/g5_cross_mart_consistency.py",
     )
 
-    # -- Step 5: AI chains --
+    # -- Step 5: AI chains (all routed through the litellm-gateway service) --
     ai_narrative = BashOperator(
         task_id="ai1_pnl_narrative",
         bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ai_chains/ai1_pnl_narrative.py",
@@ -87,9 +94,14 @@ with DAG(
         bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ai_chains/ai2_transformation_docs.py",
     )
 
+    ai_variance = BashOperator(
+        task_id="ai4_variance_agent",
+        bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ai_chains/ai4_variance_agent.py",
+    )
+
     ai_judge = BashOperator(
-        task_id="ai3_narrative_judge",
-        bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ai_chains/ai3_narrative_judge.py",
+        task_id="ai3_narrative_judge_v2",
+        bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ai_chains/ai3_narrative_judge_v2.py",
     )
 
     # -- DAG dependency chain --
@@ -102,9 +114,11 @@ with DAG(
     # Post-gates after dbt
     dbt_build >> [gate_g4, gate_g5]
 
-    # AI chains after post-gates pass
+    # AI chains after post-gates pass — ai1/ai2/ai4 only need the marts, so they
+    # fan out in parallel rather than chaining.
     [gate_g4, gate_g5] >> ai_narrative
     [gate_g4, gate_g5] >> ai_docs
+    [gate_g4, gate_g5] >> ai_variance
 
-    # Judge runs after narrative is generated
+    # Judge (v2) runs after the narrative it's scoring exists.
     ai_narrative >> ai_judge

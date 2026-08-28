@@ -1,12 +1,19 @@
 """
-AI-3 — AI-as-Judge: Narrative Consistency Validation (Gemini 2.5 Flash)
+AI-3 v1 — AI-as-Judge: Narrative Consistency Validation (Gemini 2.5 Flash)
 Reads the AI-generated P&L narrative and the actual mart data, then uses
 Gemini to check whether every claim in the narrative is supported by the data.
 
-This is a PIPELINE GATE — if the narrative contradicts the data, it blocks
-publication to Power BI.
+SUPERSEDED (Phase 2, Wk 14) by ai3_narrative_judge_v2.py, which scores each claim
+individually with a weighted three-signal confidence score and routes it through
+the ai_review_queue HITL table instead of one whole-narrative PASS/FAIL verdict.
+
+This module is kept in the repo for two reasons:
+1. It's still runnable standalone (original mid-term behaviour, unchanged below).
+2. extract_claims() is reused by ai3_narrative_judge_v2.py to split the narrative
+   into per-claim text before scoring — no need to duplicate that splitting logic.
 """
 
+import re
 import sys
 import json
 from pathlib import Path
@@ -21,6 +28,24 @@ from langchain_core.output_parsers import StrOutputParser
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "finlineage.duckdb"
 NARRATIVE_PATH = Path(__file__).resolve().parent.parent / "data" / "gold" / "pnl_narrative.md"
+
+
+def extract_claims(narrative: str) -> list:
+    """Split a narrative into individual sentence-level claims for per-claim scoring.
+
+    Kept here (not moved) so ai3_narrative_judge_v2.py can import it without
+    duplicating the splitting logic. Only sentences containing at least one digit
+    are returned — those are the ones retrieval grounding (Section 7.4 of the
+    knowledge base) can actually check against mart_pnl_summary; qualitative
+    sentences with no numbers in them aren't verifiable claims in that sense.
+
+    Deliberately a simple regex splitter, not a full NLP sentence tokenizer —
+    this is a POC and the narrative's prose is short, well-formed board commentary.
+    """
+    flattened = narrative.replace("\n", " ").strip()
+    raw_sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', flattened)
+    claims = [s.strip() for s in raw_sentences if s.strip() and re.search(r'\d', s)]
+    return claims
 
 
 def get_pnl_data():
@@ -82,7 +107,8 @@ Verify every numerical claim. Return the JSON verdict.""")
 
 def run_ai3():
     print("\n" + "="*60)
-    print("  AI-3 — Narrative Consistency Judge (Gemini 2.5 Flash)")
+    print("  AI-3 v1 — Narrative Consistency Judge (Gemini 2.5 Flash) — SUPERSEDED")
+    print("  (see ai3_narrative_judge_v2.py for the current HITL-routed judge)")
     print("="*60 + "\n")
 
     if not NARRATIVE_PATH.exists():

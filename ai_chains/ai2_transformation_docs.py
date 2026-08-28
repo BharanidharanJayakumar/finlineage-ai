@@ -1,9 +1,13 @@
 """
-AI-2 — Transformation Documentation (Groq Llama 3.3 70B)
+AI-2 — Transformation Documentation (Groq Llama 3.3 70B, via LiteLLM gateway)
 Reads each dbt model's SQL, sends it to Groq, gets back business-readable
 documentation that finance teams and auditors can verify without reading SQL.
+
+Phase 2, Wk 14: this call now goes through the LiteLLM gateway (Layer 8) instead
+of the Groq SDK directly — see litellm_config.yaml for the "finlineage-docs" alias.
 """
 
+import os
 import sys
 import json
 from pathlib import Path
@@ -11,11 +15,14 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "finlineage" / "models"
+
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
+LITELLM_MASTER_KEY = os.getenv("LITELLM_MASTER_KEY", "sk-finlineage-local-dev")
 
 
 PROMPT = ChatPromptTemplate.from_messages([
@@ -76,10 +83,13 @@ def run_ai2():
     print("="*60 + "\n")
 
     models = get_model_files()
-    print(f"  Found {len(models)} dbt models to document\n")
+    print(f"  Found {len(models)} dbt models to document")
+    print(f"  Calling Groq via LiteLLM gateway ({LITELLM_BASE_URL})...\n")
 
-    llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+    llm = ChatOpenAI(
+        model="finlineage-docs",
+        base_url=LITELLM_BASE_URL,
+        api_key=LITELLM_MASTER_KEY,
         temperature=0.2,
         max_tokens=1000,
     )
