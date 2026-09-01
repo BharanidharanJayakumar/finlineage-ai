@@ -57,6 +57,7 @@ jobs:
         run: |
           python ge/g4_pnl_aggregation_consistency.py
           python ge/g5_cross_mart_consistency.py
+          python ge/g6_metric_drift.py
 
       - name: Verify P&L reconciliation
         run: |
@@ -70,4 +71,68 @@ jobs:
           assert diff < 0.01, f'RECONCILIATION FAILED: diff={diff}'
           print('RECONCILIATION PASSED')
           "
-          
+
+  # publishes dbt's auto-generated lineage/docs site.
+  # Only runs on an actual push to main (not on PRs), after the build+test job
+  # above has already passed. Needs a one-time manual step in this repo:
+  # Settings -> Pages -> Source = "GitHub Actions" (can't be set via a workflow
+  # file, so this is on you to flip once).
+  deploy-docs:
+    needs: dbt-build-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install dbt-core dbt-duckdb duckdb python-dotenv
+
+      - name: Install dbt packages
+        run: |
+          cd finlineage
+          dbt deps
+
+      - name: Generate source data
+        run: python scripts/generate_sources.py
+
+      - name: Create dbt profiles
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << 'EOF'
+          finlineage:
+            target: ci
+            outputs:
+              ci:
+                type: duckdb
+                path: '${{ github.workspace }}/data/finlineage.duckdb'
+                threads: 4
+          EOF
+
+      - name: dbt build
+        run: |
+          cd finlineage
+          dbt build --vars '{"bronze_path": "${{ github.workspace }}/data/bronze"}' --exclude source:*
+
+      - name: dbt docs generate
+        run: |
+          cd finlineage
+          dbt docs generate --vars '{"bronze_path": "${{ github.workspace }}/data/bronze"}'
+
+      - name: Upload docs artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: finlineage/target
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

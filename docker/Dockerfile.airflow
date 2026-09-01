@@ -1,0 +1,28 @@
+# Custom Airflow image for FinLineage AI — Phase 2, Wk 12.
+#
+# Root cause this fixes: the DAG's BashOperator tasks call
+# {PROJECT_ROOT}/.venv/bin/python, but nothing ever created that venv inside
+# the container. The project's .venv on disk is a Windows venv built by the
+# host machine — a Windows venv's binaries don't run inside a Linux
+# container, so mounting it wouldn't have worked either even if it were
+# mounted (it isn't, docker-compose.yml never lists .venv as a volume).
+#
+# Fix: build a real Linux venv INSIDE the image at build time, fully
+# isolated from Airflow's own site-packages. That isolation is deliberate —
+# pip installing this project's pinned dependencies (SQLAlchemy, pydantic,
+# etc.) directly into Airflow's own environment risks breaking the scheduler
+# against Airflow 2.10.4's own dependency constraints. A separate venv sidesteps
+# that entirely: nothing here can touch what Airflow itself needs to run.
+
+FROM apache/airflow:2.10.4-python3.12
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+USER airflow
+COPY requirements.txt /opt/airflow/project/requirements.txt
+RUN python3 -m venv /opt/airflow/project/.venv \
+    && /opt/airflow/project/.venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/airflow/project/.venv/bin/pip install --no-cache-dir -r /opt/airflow/project/requirements.txt

@@ -1,5 +1,11 @@
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.10.4-python3.12
+  # Custom-built image (Wk12) — see docker/Dockerfile.airflow for why. The
+  # stock apache/airflow image has no venv for dbt/GE/LangChain, so every
+  # DAG task was failing before this: {PROJECT_ROOT}/.venv/bin/python
+  # referred to nothing inside the container.
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.airflow
   environment:
     AIRFLOW__CORE__EXECUTOR: SequentialExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db

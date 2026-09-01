@@ -1,0 +1,18 @@
+# Committed on purpose — unusual for a dbt profiles.yml, but there are no
+# credentials here to protect (DuckDB is just a local file), and checking
+# this in removes a per-environment manual setup step that was previously
+# undocumented (Section 8 of the knowledge base notes CI generates its own
+# profiles.yml at ~/.dbt/ on the fly; this repo-local one is what
+# docker/Dockerfile.airflow + the Airflow DAG use instead).
+#
+# Path is relative to wherever dbt is invoked FROM. Every entry point in this
+# repo does `cd finlineage && dbt ... --profiles-dir .` (or --profiles-dir
+# pointing at this directory), so '../data/finlineage.duckdb' always resolves
+# to <project_root>/data/finlineage.duckdb.
+finlineage:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: '../data/finlineage.duckdb'
+      threads: 4

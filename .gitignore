@@ -8,4 +8,4 @@ data/gold/*
 *.duckdb
 target/
 dbt_packages/
-logs/
+logs/*.pbix 

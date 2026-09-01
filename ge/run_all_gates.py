@@ -13,6 +13,7 @@ GATES = [
     ("g3_payroll_completeness","G3 — Payroll Completeness"),
     ("g4_pnl_aggregation_consistency", "G4 — P&L Aggregation Consistency"),
     ("g5_cross_mart_consistency",      "G5 — Cross-Mart Consistency"),
+    ("g6_metric_drift",                "G6 — Metric Drift Detection"),
 ]
 
 

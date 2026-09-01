@@ -3,7 +3,9 @@ FinLineage AI — Daily Pipeline DAG
 Orchestrates the full E2E flow:
   1. GE pre-gates (G1, G2, G3) — block if raw data is bad
   2. dbt build (seeds + models + tests)
-  3. GE post-gates (G4, G5) — block if aggregations don't reconcile
+  3. GE post-gates (G4, G5, G6) — block if aggregations don't reconcile or a
+     metric goes to an impossible value / disappears; G6 also logs (non-blocking)
+     statistical drift warnings
   4. AI narrative generation (Gemini, via LiteLLM gateway)
   5. AI transformation docs (Groq, via LiteLLM gateway)
   6. AI variance explanation agent (Gemini, tool-calling, via LiteLLM gateway) — Wk 14
@@ -14,6 +16,13 @@ router) instead of v1's single PASS/FAIL verdict, and ai4 (variance agent) runs
 in parallel with ai1/ai2 since it only depends on the post-dbt marts, not on the
 narrative. All AI tasks call Gemini/Groq through the litellm-gateway service
 (Layer 8) rather than the provider SDKs directly.
+
+Phase 2, Wk 12: this DAG now actually runs inside Docker — every task below
+uses a Linux venv baked into the image by docker/Dockerfile.airflow (the
+project's on-disk .venv is a Windows venv and never worked inside the
+container). dbt_build also needed a --vars override for bronze_path, same
+fix .github/workflows/ci.yml already used, since dbt_project.yml's default
+is a Windows-only absolute path.
 """
 
 from datetime import datetime, timedelta
@@ -25,6 +34,11 @@ from airflow.operators.python import PythonOperator
 PROJECT_ROOT = "/opt/airflow/project"
 DBT_DIR = f"{PROJECT_ROOT}/finlineage"
 VENV_PYTHON = f"{PROJECT_ROOT}/.venv/bin/python"
+VENV_DBT = f"{PROJECT_ROOT}/.venv/bin/dbt"
+# dbt_project.yml's default bronze_path is a Windows absolute path (see Known
+# Issues in the knowledge base) — override it to the container's mounted path,
+# the same fix ci.yml already applies for the Ubuntu runner.
+DBT_VARS = '{"bronze_path": "%s/data/bronze"}' % PROJECT_ROOT
 
 default_args = {
     "owner": "finlineage",
@@ -66,10 +80,13 @@ with DAG(
         bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ge/g3_payroll_completeness.py",
     )
 
-    # -- Step 3: dbt build (seeds + all models + all tests) --
+    # -- Step 3: dbt build (deps + seeds + all models + all tests) --
     dbt_build = BashOperator(
         task_id="dbt_build",
-        bash_command=f"cd {DBT_DIR} && dbt build --profiles-dir {DBT_DIR}",
+        bash_command=(
+            f"cd {DBT_DIR} && {VENV_DBT} deps --profiles-dir {DBT_DIR} && "
+            f"{VENV_DBT} build --profiles-dir {DBT_DIR} --vars '{DBT_VARS}'"
+        ),
     )
 
     # -- Step 4: Post-dbt quality gates --
@@ -81,6 +98,11 @@ with DAG(
     gate_g5 = BashOperator(
         task_id="ge_gate_g5_cross_mart_consistency",
         bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ge/g5_cross_mart_consistency.py",
+    )
+
+    gate_g6 = BashOperator(
+        task_id="ge_gate_g6_metric_drift",
+        bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ge/g6_metric_drift.py",
     )
 
     # -- Step 5: AI chains (all routed through the litellm-gateway service) --
@@ -112,13 +134,13 @@ with DAG(
     [gate_g1, gate_g2, gate_g3] >> dbt_build
 
     # Post-gates after dbt
-    dbt_build >> [gate_g4, gate_g5]
+    dbt_build >> [gate_g4, gate_g5, gate_g6]
 
     # AI chains after post-gates pass — ai1/ai2/ai4 only need the marts, so they
     # fan out in parallel rather than chaining.
-    [gate_g4, gate_g5] >> ai_narrative
-    [gate_g4, gate_g5] >> ai_docs
-    [gate_g4, gate_g5] >> ai_variance
+    [gate_g4, gate_g5, gate_g6] >> ai_narrative
+    [gate_g4, gate_g5, gate_g6] >> ai_docs
+    [gate_g4, gate_g5, gate_g6] >> ai_variance
 
     # Judge (v2) runs after the narrative it's scoring exists.
     ai_narrative >> ai_judge
