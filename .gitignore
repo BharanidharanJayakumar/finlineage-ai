@@ -11,3 +11,4 @@ dbt_packages/
 logs/
 *.pbix
 finlineage/.user.yml
+data/synthetic_anomaly_test/
