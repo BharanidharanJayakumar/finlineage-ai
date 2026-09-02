@@ -81,11 +81,19 @@ with DAG(
     )
 
     # -- Step 3: dbt build (deps + seeds + all models + all tests) --
+    # --exclude source:* skips dbt's source freshness/existence tests, which
+    # are defined in models/staging/_sources.yml against a hardcoded Windows
+    # absolute path (independent of the bronze_path var overridden above,
+    # which only applies to the models). Same known issue documented in the
+    # knowledge base ("Source tests fail in CI (path not portable)") and
+    # already worked around this exact way in .github/workflows/ci.yml — this
+    # just carries that fix over to the DAG, which never had it. Model-level
+    # tests still cover the same data, so nothing is actually left unchecked.
     dbt_build = BashOperator(
         task_id="dbt_build",
         bash_command=(
             f"cd {DBT_DIR} && {VENV_DBT} deps --profiles-dir {DBT_DIR} && "
-            f"{VENV_DBT} build --profiles-dir {DBT_DIR} --vars '{DBT_VARS}'"
+            f"{VENV_DBT} build --profiles-dir {DBT_DIR} --vars '{DBT_VARS}' --exclude source:*"
         ),
     )
 
