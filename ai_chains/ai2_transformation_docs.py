@@ -5,11 +5,18 @@ documentation that finance teams and auditors can verify without reading SQL.
 
 Phase 2, Wk 14: this call now goes through the LiteLLM gateway (Layer 8) instead
 of the Groq SDK directly — see litellm_config.yaml for the "finlineage-docs" alias.
+
+Also writes data/gold/transformation_docs_fingerprints.json — a sha256 of each
+model's .sql content at the moment it was documented here. That manifest is
+what ai6_doc_drift_detector.py compares against later to catch cases where the
+SQL changes but this script doesn't get a chance to re-run (see that script's
+docstring for why that's a real, not hypothetical, gap).
 """
 
 import os
 import sys
 import json
+import hashlib
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -112,6 +119,18 @@ def run_ai2():
 
     print(f"\n  Saved {len(models)} model docs to: {output_path.name}")
     print(f"  Total length: {len(full_doc):,} characters")
+
+    # Fingerprint manifest for AI-6 (ai6_doc_drift_detector.py) — only reachable
+    # here because every model above succeeded (an exception mid-loop propagates
+    # before this line), so a fingerprint written here always means "this model's
+    # doc genuinely reflects this exact SQL", never a partial/failed run.
+    fingerprints = {
+        m["model_name"]: {"layer": m["layer"], "sha256": hashlib.sha256(m["sql_content"].encode("utf-8")).hexdigest()}
+        for m in models
+    }
+    fingerprints_path = output_path.parent / "transformation_docs_fingerprints.json"
+    fingerprints_path.write_text(json.dumps(fingerprints, indent=2), encoding="utf-8")
+    print(f"  Saved fingerprint manifest to: {fingerprints_path.name}")
 
     return full_doc
 

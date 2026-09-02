@@ -10,12 +10,19 @@ Orchestrates the full E2E flow:
   5. AI transformation docs (Groq, via LiteLLM gateway)
   6. AI variance explanation agent (Gemini, tool-calling, via LiteLLM gateway) — Wk 14
   7. AI-as-judge confidence scoring + HITL routing (Gemini, via LiteLLM gateway) — v2, Wk 14
+  8. AI-6 documentation drift detector (deterministic, no LLM call) — added 2026-09-02
 
 Phase 2, Wk 14: ai3 now runs ai3_narrative_judge_v2.py (confidence-scored HITL
 router) instead of v1's single PASS/FAIL verdict, and ai4 (variance agent) runs
 in parallel with ai1/ai2 since it only depends on the post-dbt marts, not on the
 narrative. All AI tasks call Gemini/Groq through the litellm-gateway service
 (Layer 8) rather than the provider SDKs directly.
+
+AI-6 (ai6_doc_drift_detector.py) is the exception — it makes no LLM/gateway
+call at all, so it can't be starved by the Gemini/Groq quota exhaustion that
+hit ai2/ai4 live on 2026-09-02. It's wired in parallel with ai1/ai2/ai4 rather
+than depending on ai2, deliberately: the whole point is to still catch stale
+docs on a run where ai2 itself fails or gets skipped.
 
 Phase 2, Wk 12: this DAG now actually runs inside Docker — every task below
 uses a Linux venv baked into the image by docker/Dockerfile.airflow (the
@@ -134,6 +141,16 @@ with DAG(
         bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ai_chains/ai3_narrative_judge_v2.py",
     )
 
+    # AI-6 — doc drift detector. No LLM/gateway call (see module docstring),
+    # so it doesn't strictly need the marts either — it only reads dbt's .sql
+    # files off disk. Wired here alongside the other AI chains anyway, for a
+    # readable DAG graph and because finlineage.duckdb (where its results get
+    # written) only exists once dbt_build has run at least once.
+    ai_doc_drift = BashOperator(
+        task_id="ai6_doc_drift_detection",
+        bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ai_chains/ai6_doc_drift_detector.py",
+    )
+
     # -- DAG dependency chain --
     # Ingestion
     generate_sources >> [gate_g1, gate_g2, gate_g3]
@@ -144,11 +161,13 @@ with DAG(
     # Post-gates after dbt
     dbt_build >> [gate_g4, gate_g5, gate_g6]
 
-    # AI chains after post-gates pass — ai1/ai2/ai4 only need the marts, so they
-    # fan out in parallel rather than chaining.
+    # AI chains after post-gates pass — ai1/ai2/ai4/ai6 only need the marts (or,
+    # for ai6, just dbt having run once), so they fan out in parallel rather
+    # than chaining.
     [gate_g4, gate_g5, gate_g6] >> ai_narrative
     [gate_g4, gate_g5, gate_g6] >> ai_docs
     [gate_g4, gate_g5, gate_g6] >> ai_variance
+    [gate_g4, gate_g5, gate_g6] >> ai_doc_drift
 
     # Judge (v2) runs after the narrative it's scoring exists.
     ai_narrative >> ai_judge
