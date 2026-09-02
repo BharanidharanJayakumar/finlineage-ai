@@ -17,9 +17,12 @@ import pandas as pd
 BRONZE = Path(__file__).resolve().parent.parent / "data" / "bronze"
 
 
-def run_g2():
-    fx = pd.read_csv(BRONZE / "fx_rates.csv")
-    gl = pd.read_csv(BRONZE / "erp_gl_entries.csv")
+def run_g2(bronze_dir: Path = None):
+    """bronze_dir override added for ai5_anomaly_generator.py — see the same
+    note in g1_raw_gl_completeness.py. Defaults to the real BRONZE dir."""
+    bronze_dir = bronze_dir or BRONZE
+    fx = pd.read_csv(bronze_dir / "fx_rates.csv")
+    gl = pd.read_csv(bronze_dir / "erp_gl_entries.csv")
 
     results = []
 

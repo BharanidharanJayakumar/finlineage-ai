@@ -11,6 +11,7 @@ Orchestrates the full E2E flow:
   6. AI variance explanation agent (Gemini, tool-calling, via LiteLLM gateway) — Wk 14
   7. AI-as-judge confidence scoring + HITL routing (Gemini, via LiteLLM gateway) — v2, Wk 14
   8. AI-6 documentation drift detector (deterministic, no LLM call) — added 2026-09-02
+  9. AI-5 synthetic anomaly generator (deterministic, no LLM call) — Wk 15, added 2026-09-02
 
 Phase 2, Wk 14: ai3 now runs ai3_narrative_judge_v2.py (confidence-scored HITL
 router) instead of v1's single PASS/FAIL verdict, and ai4 (variance agent) runs
@@ -18,11 +19,18 @@ in parallel with ai1/ai2 since it only depends on the post-dbt marts, not on the
 narrative. All AI tasks call Gemini/Groq through the litellm-gateway service
 (Layer 8) rather than the provider SDKs directly.
 
-AI-6 (ai6_doc_drift_detector.py) is the exception — it makes no LLM/gateway
-call at all, so it can't be starved by the Gemini/Groq quota exhaustion that
-hit ai2/ai4 live on 2026-09-02. It's wired in parallel with ai1/ai2/ai4 rather
-than depending on ai2, deliberately: the whole point is to still catch stale
-docs on a run where ai2 itself fails or gets skipped.
+AI-6 (ai6_doc_drift_detector.py) and AI-5 (ai5_anomaly_generator.py) are the
+exceptions — neither makes an LLM/gateway call, so neither can be starved by
+the Gemini/Groq quota exhaustion that hit ai2/ai4 live on 2026-09-02. Both are
+wired in parallel with ai1/ai2/ai4 rather than depending on them.
+
+AI-5 deterministically injects known-bad mutations into isolated COPIES of
+the bronze CSVs (never data/bronze/ itself) and re-runs G1/G2/G3 against each
+to verify they actually catch it — proof the gates work, not just an
+assumption they do, the same evidence pattern AI-3 established for the
+narrative judge at mid-term. Any anomaly that escapes detection is routed to
+ai_review_queue (source_chain='ai5_synthetic_anomaly') rather than silently
+passing.
 
 Phase 2, Wk 12: this DAG now actually runs inside Docker — every task below
 uses a Linux venv baked into the image by docker/Dockerfile.airflow (the
@@ -151,6 +159,16 @@ with DAG(
         bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ai_chains/ai6_doc_drift_detector.py",
     )
 
+    # AI-5 — synthetic anomaly generator. Like AI-6, no LLM/gateway call and no
+    # dependency on the marts either — it only needs data/bronze/ (present
+    # since generate_source_data) and writes to finlineage.duckdb (created on
+    # first connect if it doesn't exist yet). Wired here anyway, alongside the
+    # other AI chains, for a readable DAG graph.
+    ai_anomaly = BashOperator(
+        task_id="ai5_anomaly_generator",
+        bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ai_chains/ai5_anomaly_generator.py",
+    )
+
     # -- DAG dependency chain --
     # Ingestion
     generate_sources >> [gate_g1, gate_g2, gate_g3]
@@ -168,6 +186,7 @@ with DAG(
     [gate_g4, gate_g5, gate_g6] >> ai_docs
     [gate_g4, gate_g5, gate_g6] >> ai_variance
     [gate_g4, gate_g5, gate_g6] >> ai_doc_drift
+    [gate_g4, gate_g5, gate_g6] >> ai_anomaly
 
     # Judge (v2) runs after the narrative it's scoring exists.
     ai_narrative >> ai_judge

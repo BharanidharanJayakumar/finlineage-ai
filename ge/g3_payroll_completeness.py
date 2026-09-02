@@ -10,8 +10,11 @@ import pandas as pd
 BRONZE = Path(__file__).resolve().parent.parent / "data" / "bronze"
 
 
-def run_g3():
-    df = pd.read_csv(BRONZE / "payroll_entries.csv")
+def run_g3(bronze_dir: Path = None):
+    """bronze_dir override added for ai5_anomaly_generator.py — see the same
+    note in g1_raw_gl_completeness.py. Defaults to the real BRONZE dir."""
+    bronze_dir = bronze_dir or BRONZE
+    df = pd.read_csv(bronze_dir / "payroll_entries.csv")
 
     results = []
 

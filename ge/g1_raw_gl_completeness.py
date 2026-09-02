@@ -17,14 +17,21 @@ from great_expectations.expectations import (
 )
 
 BRONZE = Path(__file__).resolve().parent.parent / "data" / "bronze"
-CSV_PATH = BRONZE / "erp_gl_entries.csv"
 
 
-def run_g1():
+def run_g1(bronze_dir: Path = None):
+    """bronze_dir override added for ai5_anomaly_generator.py, which runs this
+    same check against an isolated, mutated copy of the bronze CSVs — never
+    against the real data/bronze/ — to verify a synthetic anomaly actually
+    gets caught. Defaults to the real BRONZE dir, so every existing caller
+    (the DAG, ci.yml, running this file directly) is unaffected."""
+    bronze_dir = bronze_dir or BRONZE
+    csv_path = bronze_dir / "erp_gl_entries.csv"
+
     context = gx.get_context()
 
     # Use in-memory pandas datasource (works reliably across GE versions)
-    df = pd.read_csv(CSV_PATH)
+    df = pd.read_csv(csv_path)
 
     ds = context.data_sources.add_or_update_pandas(name="bronze_pandas")
     asset = ds.add_dataframe_asset(name="erp_gl_entries")
@@ -66,7 +73,7 @@ def run_g1():
 
     print(f"\n{'='*60}")
     print(f"  GE Gate G1 — Raw GL Completeness")
-    print(f"  File: {CSV_PATH.name}")
+    print(f"  File: {csv_path.name}")
     print(f"  Expectations: {total}  |  Passed: {total - len(failures)}  |  Failed: {len(failures)}")
     print(f"  Gate: {'PASS ✓' if passed else 'FAIL ✗ — pipeline blocked'}")
     print(f"{'='*60}\n")
