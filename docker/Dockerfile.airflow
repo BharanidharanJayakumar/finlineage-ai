@@ -19,10 +19,17 @@ FROM apache/airflow:2.10.4-python3.12
 USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/airflow/project \
+    && chown -R airflow:root /opt/airflow/project
 
+# COPY's destination directory is root-owned by default even with USER
+# already set to airflow — ownership doesn't follow the active USER unless
+# told to. --chown here is what actually let the venv step below write into
+# it (caught by an actual `docker compose up --build` failing with
+# "Permission denied: '/opt/airflow/project/.venv'" before this was added).
 USER airflow
-COPY requirements.txt /opt/airflow/project/requirements.txt
+COPY --chown=airflow:root requirements.txt /opt/airflow/project/requirements.txt
 RUN python3 -m venv /opt/airflow/project/.venv \
     && /opt/airflow/project/.venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/airflow/project/.venv/bin/pip install --no-cache-dir -r /opt/airflow/project/requirements.txt
