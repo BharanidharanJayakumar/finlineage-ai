@@ -9,7 +9,13 @@
 # than per-team DB-backed keys — budgets/fallback/caching all still work without a DB.
 
 model_list:
-  # AI-1 (narrative) and AI-3 (judge) — Gemini 2.5 Flash, free tier 10 RPM / 250 RPD.
+  # AI-1 (narrative) and AI-3 (judge) — Gemini 2.5 Flash. Free-tier quota is
+  # narrower than first documented here: a live 429 on 2026-09-02 showed
+  # generativelanguage.googleapis.com's free-tier daily quota for this model
+  # at 20 requests/day (generate_content_free_tier_requests), not 250 — easy
+  # to exhaust across a few DAG re-triggers in one testing session. The
+  # fallback below is what actually saves a run once that's hit; it only
+  # works now that it points at a real Groq model (see below).
   - model_name: finlineage-narrative
     litellm_params:
       model: gemini/gemini-2.5-flash
@@ -21,19 +27,29 @@ model_list:
 
   # Fallback target when Gemini free-tier rate limit is hit mid-DAG — Groq instead
   # of failing the AI-1/AI-3 task outright.
+  #
+  # groq/llama-3.3-70b-versatile was shut down by Groq on 2026-08-16 (see
+  # https://console.groq.com/docs/deprecations) — confirmed live against a
+  # real DAG run on 2026-09-02: every call returned
+  # `litellm.NotFoundError: GroqException - ... model_not_found`. Switched to
+  # openai/gpt-oss-120b, Groq's own listed replacement for this deprecation
+  # (a Groq-hosted OpenAI OSS model, not an actual OpenAI API call — the
+  # "openai/" here is part of Groq's own model id, hence the doubled prefix
+  # below: groq/<groq's model id>).
   - model_name: finlineage-narrative-fallback
     litellm_params:
-      model: groq/llama-3.3-70b-versatile
+      model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
       temperature: 0.3
       max_tokens: 4096
     model_info:
       id: finlineage-narrative-fallback
 
-  # AI-2 (transformation docs) — Groq Llama 3.3 70B, free tier 30 RPM / 1,000 RPD.
+  # AI-2 (transformation docs) — was Groq Llama 3.3 70B; that model was shut
+  # down by Groq on 2026-08-16 (see note above). Switched to openai/gpt-oss-120b.
   - model_name: finlineage-docs
     litellm_params:
-      model: groq/llama-3.3-70b-versatile
+      model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
       temperature: 0.2
       max_tokens: 1000
@@ -51,11 +67,37 @@ model_list:
     model_info:
       id: finlineage-agent
 
+  # Fallback for AI-4 — added 2026-09-02 after a live run showed ai4 has no
+  # fallback at all: finlineage-narrative and finlineage-agent both proxy to
+  # the SAME underlying gemini-2.5-flash model/key, so Google's 20-req/day
+  # free-tier quota is one shared budget across ai1+ai3+ai4, not 20 each.
+  # Only finlineage-narrative had a fallback mapped, so a quota hit on ai4
+  # specifically failed the task outright instead of trying Groq — this
+  # closes that gap.
+  #
+  # CAVEAT — not yet verified end-to-end: ai4 does LangChain tool-calling
+  # (bind_tools). openai/gpt-oss-120b is generally built for agentic/tool
+  # use, so this should work, but I haven't been able to confirm Groq's
+  # tool-calling behavior for this model from here — needs a real run where
+  # this fallback actually fires (e.g. by triggering the DAG again while the
+  # Gemini quota is still exhausted) to be sure it's not just a different
+  # failure mode.
+  - model_name: finlineage-agent-fallback
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+      temperature: 0.1
+      max_tokens: 2048
+    model_info:
+      id: finlineage-agent-fallback
+
 litellm_settings:
-  # Gemini free tier is 10 RPM / 250 RPD — if AI-1/AI-3 hit that limit mid-DAG,
-  # fall back to Groq instead of failing the pipeline task.
+  # Gemini free tier is actually 20 requests/day for gemini-2.5-flash (see
+  # note above) — if AI-1/AI-3/AI-4 hit that limit mid-DAG, fall back to
+  # Groq instead of failing the pipeline task.
   fallbacks:
     - finlineage-narrative: ["finlineage-narrative-fallback"]
+    - finlineage-agent: ["finlineage-agent-fallback"]
   num_retries: 2
   request_timeout: 45
 
