@@ -251,3 +251,89 @@ def duckdb_conn(dag_run):
     conn = duckdb.connect(str(DB_PATH), read_only=True)
     yield conn
     conn.close()
+
+
+# =============================================================================
+# Wk16/17 — unit-test fixtures (no Docker/Airflow required)
+#
+# Everything below supports the NEW unit-test files (test_ge_gates.py,
+# test_ai1_pnl_narrative.py, test_ai5_anomaly_generator.py, etc.) added to
+# actually instrument pytest-cov, rather than estimating coverage. These are
+# deliberately independent of the docker_stack/dag_run fixtures above — they
+# run against a disposable COPY of the real data/finlineage.duckdb (never the
+# file itself, so a test can never corrupt the dev/demo database), and don't
+# need Docker, Airflow, or a live Gemini/Groq key at all.
+# =============================================================================
+
+import shutil
+
+
+@pytest.fixture()
+def writable_db(tmp_path):
+    """A fresh, disposable copy of the real finlineage.duckdb that a test is
+    free to INSERT into (ai1's _write_snippet, ai5's run_ai5, ai6's
+    write_results all open their DB_PATH read-write). Function-scoped so
+    every test gets a clean copy unaffected by any other test's writes.
+
+    Keeps the exact filename "finlineage.duckdb" (just under a fresh tmp_path
+    directory) — several of the mart views embed fully-qualified
+    `finlineage.main.<table>` references, and duckdb derives that catalog
+    name from the file's own basename, so renaming the copy breaks those
+    lookups with a "Catalog does not exist" error (confirmed while building
+    this fixture)."""
+    dst = tmp_path / "finlineage.duckdb"
+    shutil.copyfile(DB_PATH, dst)
+    return dst
+
+
+@pytest.fixture()
+def full_view_db(tmp_path):
+    """A disposable duckdb copy where the three base staging views
+    (stg_erp_gl_entries / stg_fx_rates / stg_payroll_entries) are repointed
+    at the LOCAL staged bronze CSVs, instead of the Windows-absolute path
+    baked into them at dbt-build time on the participant's machine.
+
+    Why this is needed: dbt configures staging/intermediate models as VIEWS
+    (see run_in_airflow_container()'s docstring above) whose stored SQL calls
+    read_csv_auto('<the exact path bronze lived at when dbt built this file>').
+    That is a real, already-documented cross-environment limitation (it's why
+    the E2E suite above runs its own reconciliation check INSIDE the Airflow
+    container rather than from the host). A host-side pytest run — in CI, in
+    this sandbox, or on a teammate's machine with a different checkout path —
+    hits the identical problem on any check that reads through
+    int_entries_cost_centre_mapped, which is exactly what GE Gate G4's first
+    two checks do. Repointing the 3 leaf views at a real, locally-reachable
+    CSV directory is a standard test-fixture technique for this class of
+    "view remembers an absolute build-time path" problem — it changes ONLY
+    the disposable copy, never data/finlineage.duckdb itself, and every
+    downstream view/table (int_entries_fx_converted,
+    int_entries_cost_centre_mapped, all 5 marts) still runs its own real SQL
+    unchanged on top of that swapped-in source. Keeps the filename
+    "finlineage.duckdb" for the same catalog-name reason documented in
+    writable_db() above — under a dedicated subdirectory so it never
+    collides with writable_db()'s own copy in the same test."""
+    sub = tmp_path / "full_view"
+    sub.mkdir()
+    dst = sub / "finlineage.duckdb"
+    shutil.copyfile(DB_PATH, dst)
+    bronze_dir = PROJECT_ROOT / "data" / "bronze"
+    conn = duckdb.connect(str(dst), read_only=False)
+    for view, csv_name in [
+        ("stg_erp_gl_entries", "erp_gl_entries.csv"),
+        ("stg_fx_rates", "fx_rates.csv"),
+        ("stg_payroll_entries", "payroll_entries.csv"),
+    ]:
+        old_sql = conn.execute(
+            "SELECT sql FROM duckdb_views() WHERE view_name = ?", [view]
+        ).fetchone()[0]
+        csv_path = str(bronze_dir / csv_name).replace("\\", "/")
+        # Replace the read_csv_auto('<anything>') argument with the local path.
+        new_sql = re.sub(
+            r"read_csv_auto\('[^']*'",
+            f"read_csv_auto('{csv_path}'",
+            old_sql,
+        )
+        new_sql = new_sql.replace(f"CREATE VIEW {view} AS", f"CREATE OR REPLACE VIEW {view} AS", 1)
+        conn.execute(new_sql)
+    conn.close()
+    return dst
