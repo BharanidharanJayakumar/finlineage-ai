@@ -12,6 +12,16 @@ Orchestrates the full E2E flow:
   7. AI-as-judge confidence scoring + HITL routing (Gemini, via LiteLLM gateway) — v2, Wk 14
   8. AI-6 documentation drift detector (deterministic, no LLM call) — added 2026-09-02
   9. AI-5 synthetic anomaly generator (deterministic, no LLM call) — Wk 15, added 2026-09-02
+ 10. Databricks sync — pushes the 5 gold marts to Databricks as Delta tables so
+     Power BI can connect live instead of re-importing static CSVs — added 2026-09-03
+
+Databricks sync (scripts/sync_gold_to_databricks.py) is, like AI-5/AI-6, wired
+independent of the Gemini/Groq-dependent chains — it never calls the LiteLLM
+gateway, only DuckDB (read) and the Databricks SQL warehouse (write). It reads
+DATABRICKS_SERVER_HOSTNAME / DATABRICKS_HTTP_PATH / DATABRICKS_ACCESS_TOKEN /
+DATABRICKS_CATALOG / DATABRICKS_SCHEMA from .env (mounted into the container —
+see docker-compose.yml); the task legitimately fails if those aren't set,
+which is expected on a fresh checkout without Databricks configured, not a bug.
 
 Phase 2, Wk 14: ai3 now runs ai3_narrative_judge_v2.py (confidence-scored HITL
 router) instead of v1's single PASS/FAIL verdict, and ai4 (variance agent) runs
@@ -169,6 +179,16 @@ with DAG(
         bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} ai_chains/ai5_anomaly_generator.py",
     )
 
+    # Databricks sync — pushes the 5 gold marts to a Databricks SQL warehouse
+    # as Delta tables (CREATE OR REPLACE TABLE, full refresh each run) so
+    # Power BI can connect live to Databricks instead of re-importing static
+    # CSVs. No LLM/gateway call — see module docstring. Only needs dbt_build
+    # to have populated the marts, same as the other post-gate tasks.
+    databricks_sync = BashOperator(
+        task_id="sync_gold_to_databricks",
+        bash_command=f"cd {PROJECT_ROOT} && {VENV_PYTHON} scripts/sync_gold_to_databricks.py",
+    )
+
     # -- DAG dependency chain --
     # Ingestion
     generate_sources >> [gate_g1, gate_g2, gate_g3]
@@ -187,6 +207,7 @@ with DAG(
     [gate_g4, gate_g5, gate_g6] >> ai_variance
     [gate_g4, gate_g5, gate_g6] >> ai_doc_drift
     [gate_g4, gate_g5, gate_g6] >> ai_anomaly
+    [gate_g4, gate_g5, gate_g6] >> databricks_sync
 
     # Judge (v2) runs after the narrative it's scoring exists.
     ai_narrative >> ai_judge

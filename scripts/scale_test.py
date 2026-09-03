@@ -55,8 +55,25 @@ PAYROLL_ROWS = 20_000
 def _timed_run(label: str, cmd: list, cwd: Path = PROJECT_ROOT, env: dict = None):
     print(f"\n--- {label} ---")
     start = time.time()
-    full_env = {**os.environ, **(env or {})}
-    result = subprocess.run(cmd, cwd=cwd, env=full_env, capture_output=True, text=True)
+    # Force UTF-8 for the child's stdout/stderr. On Windows, a Python
+    # process whose stdout is piped (as it is here, via capture_output)
+    # rather than attached to a real console falls back to the system's
+    # ANSI codepage (cp1252) instead of UTF-8 unless told otherwise — and
+    # ge/g1_raw_gl_completeness.py (and the other gate scripts) print a
+    # literal "✓"/"✗" in their PASS/FAIL banner, which cp1252 can't encode
+    # at all. Without this, every gate subprocess crashes with
+    # UnicodeEncodeError before it even gets to run its checks — a tooling
+    # bug in how this script invokes them, not a problem with the gates
+    # themselves (they run fine when invoked directly in a real terminal).
+    full_env = {**os.environ, **(env or {}), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    # encoding="utf-8" here is the other half of the fix: it tells THIS
+    # (parent) process to decode the child's captured stdout/stderr bytes
+    # as UTF-8. Without it, subprocess.run falls back to
+    # locale.getpreferredencoding() — cp1252 on Windows — which doesn't
+    # crash (cp1252 can decode any byte to *something*) but silently
+    # mangles the "✓"/"—" characters the child wrote as UTF-8 into
+    # garbage like "âœ"" / "â€"".
+    result = subprocess.run(cmd, cwd=cwd, env=full_env, capture_output=True, text=True, encoding="utf-8")
     elapsed = time.time() - start
     tail = result.stdout[-3000:] if result.stdout else ""
     print(tail)
