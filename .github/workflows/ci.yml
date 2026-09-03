@@ -184,6 +184,20 @@ jobs:
           DATABRICKS_SCHEMA=${{ secrets.DATABRICKS_SCHEMA }}
           EOF
 
+      # The airflow-standalone container runs as the image's baked-in
+      # non-root user (UID 50000). On a fresh checkout, data/ doesn't exist
+      # yet -- Docker creates it root-owned with restrictive permissions the
+      # moment the bind mount is set up, and generate_sources.py then can't
+      # write into it (same for finlineage/target/ once dbt build runs).
+      # This never shows up on Windows/Docker Desktop, which doesn't
+      # enforce Linux UID permissions on bind mounts the same way -- it's
+      # CI-runner-specific. Harmless to chmod 777 here: this is a throwaway
+      # VM torn down at the end of the job, not your machine.
+      - name: Pre-create mounted directories with open permissions
+        run: |
+          mkdir -p data finlineage/target finlineage/logs finlineage/dbt_packages
+          chmod -R 777 data finlineage
+
       - name: Bring up the docker-compose stack
         run: docker compose up -d --build
 
