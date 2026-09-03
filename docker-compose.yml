@@ -30,6 +30,7 @@ x-airflow-common: &airflow-common
     - ./review_queue_schema.sql:/opt/airflow/project/review_queue_schema.sql
     - ./doc_drift_schema.sql:/opt/airflow/project/doc_drift_schema.sql
     - ./synthetic_anomaly_schema.sql:/opt/airflow/project/synthetic_anomaly_schema.sql
+    - ./ai_narrative_snippets_schema.sql:/opt/airflow/project/ai_narrative_snippets_schema.sql
     - ./.env:/opt/airflow/project/.env
 
 services:

@@ -1,9 +1,11 @@
 """
 scripts/sync_gold_to_databricks.py — Databricks integration (Phase 2, Wk 11)
 
-Pushes the 5 Gold mart tables from local DuckDB into a Databricks SQL
-warehouse as Delta tables, so the same governed marts this project already
-builds are queryable from Databricks too. This does NOT replace DuckDB —
+Pushes the 5 Gold mart tables, plus the ai_narrative_snippets table (added
+Wk 15, 2026-09-03 — see ai_narrative_snippets_schema.sql), from local DuckDB
+into a Databricks SQL warehouse as Delta tables, so the same governed marts
+this project already builds are queryable from Databricks too. This does NOT
+replace DuckDB —
 DuckDB stays the pipeline's own execution engine; this is a one-way sync of
 the finished marts outward, run after dbt build (and, in Docker, after the
 GE post-gates pass).
@@ -26,6 +28,7 @@ Run: python scripts/sync_gold_to_databricks.py
 
 import os
 import sys
+import uuid
 import datetime
 import decimal
 from pathlib import Path
@@ -44,6 +47,11 @@ MARTS = [
     "mart_cost_analysis",
     "mart_variance_analysis",
     "mart_metric_dictionary",
+    # Not a dbt mart — AI-1's bounded card-headline output (Wk 15). Reuses
+    # this same sync mechanism (name-a-table-and-it-ships) rather than
+    # writing a second sync path just because its source is an AI chain
+    # instead of dbt.
+    "ai_narrative_snippets",
 ]
 
 # Rows per INSERT statement. Marts here are small (tens to low thousands of
@@ -129,6 +137,7 @@ def sync_to_databricks(frames: dict) -> bool:
         return False
 
     print(f"\n  Connecting to {host} ...")
+    grand_total = 0
     with sql.connect(server_hostname=host, http_path=http_path, access_token=token) as conn:
         with conn.cursor() as cur:
             cur.execute(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
@@ -162,6 +171,30 @@ def sync_to_databricks(frames: dict) -> bool:
                     total += len(batch_rows)
 
                 print(f"  {mart}: {total} rows -> {table}")
+                grand_total += total
+
+            # Freshness marker — a single-row table stamped with this run's
+            # timestamp. The 5 marts are seeded from generate_sources.py with
+            # a fixed random.seed(42) (see Section 9 of the knowledge base),
+            # so their VALUES are identical every run by design — reproducible
+            # test data, not a bug. That means BI visuals bound only to the
+            # marts can look unchanged after a Refresh even though this sync
+            # genuinely ran again. This table gives Power BI (and anyone
+            # eyeballing Databricks directly) something that visibly changes
+            # on every single run, as real proof of a live pipeline rather
+            # than a static import: bind a card visual to MAX(synced_at).
+            sync_table = f"{catalog}.{schema}._pipeline_sync_log"
+            cur.execute(
+                f"CREATE TABLE IF NOT EXISTS {sync_table} "
+                f"(sync_run_id STRING, synced_at TIMESTAMP, total_rows_synced BIGINT) USING DELTA"
+            )
+            now = datetime.datetime.now(datetime.timezone.utc)
+            run_id = str(uuid.uuid4())
+            cur.execute(
+                f"INSERT INTO {sync_table} (sync_run_id, synced_at, total_rows_synced) "
+                f"VALUES ('{run_id}', CAST('{now.isoformat()}' AS TIMESTAMP), {grand_total})"
+            )
+            print(f"  _pipeline_sync_log: stamped run {run_id[:8]}... at {now.isoformat()}")
 
     print("\n  Done. Gold marts are now queryable from Databricks SQL / notebooks.")
     return True

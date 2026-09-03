@@ -120,6 +120,37 @@ table + relationships) rather than just adding a measure — that's a deliberate
 model change worth doing in Power BI Desktop where you can see the effect,
 not something to paste blind.
 
+## `ai_narrative_snippets` — dynamic AI headline card (Wk 15, added 2026-09-03)
+
+AI-1 now also writes a short, bounded headline into `ai_narrative_snippets`
+every run (see `ai_narrative_snippets_schema.sql`) — same Gemini call that
+already produces the full P&L narrative, no extra LLM call. It's an
+append-only log (one row per run), so the card needs to pick out the LATEST
+row for its `snippet_type`, never just `SUM`/`AVERAGE` the column:
+
+```dax
+PnL Executive Headline =
+VAR LatestTime =
+    CALCULATE (
+        MAX ( ai_narrative_snippets[generated_at] ),
+        ai_narrative_snippets[snippet_type] = "pnl_executive_headline"
+    )
+RETURN
+    CALCULATE (
+        SELECTEDVALUE ( ai_narrative_snippets[snippet_text] ),
+        ai_narrative_snippets[snippet_type] = "pnl_executive_headline",
+        ai_narrative_snippets[generated_at] = LatestTime
+    )
+```
+
+Add this measure on the `ai_narrative_snippets` table, then drop it into a
+Card visual on the P&L Summary page (replacing the static "Enterprise drives
+90%+..." text box) — it updates on its own every time the pipeline runs and
+`sync_gold_to_databricks.py` pushes a fresh row, no manual editing. More
+`snippet_type` values (e.g. for Variance Analysis) get the same treatment —
+one new `CALCULATE(... snippet_type = "...")` measure each, added one BI
+card at a time as agreed.
+
 ## `is_material_variance` — not a measure
 
 It's already a boolean column on `mart_variance_analysis`, meant for
