@@ -9,11 +9,35 @@ Run from project root:  python scripts/generate_sources.py
 """
 
 import csv
+import os
 import random
 from datetime import date, timedelta
 from pathlib import Path
 
-random.seed(42)  # reproducible — so tests pass consistently
+# Default 42 keeps every normal run reproducible (P&L reconciliation, dbt
+# tests, evaluation evidence all depend on this staying deterministic).
+# FINLINEAGE_SEED is an escape hatch for demos only — set it in .env to a
+# different integer to get a genuinely different (still internally
+# consistent) synthetic dataset flow all the way through to Power BI, so a
+# refresh actually shows different numbers instead of just a new timestamp.
+# Unset it (or delete the line) afterward to go back to the official seed.
+SEED = int(os.environ.get("FINLINEAGE_SEED", "42"))
+random.seed(SEED)
+if SEED != 42:
+    print(f"NOTE: using FINLINEAGE_SEED={SEED} (not the default 42) — demo/test data, not the reproducible baseline.")
+
+# Wk 16 scale test escape hatch — same pattern as FINLINEAGE_SEED above.
+# Defaults (500/200) are the official, evidence-bearing row counts; set
+# these two env vars to generate a bigger dataset (see scripts/scale_test.py,
+# which sets them to 50,000/20,000) without touching gen_erp_entries()/
+# gen_payroll_entries()'s own code. Unset afterward (or just re-run with no
+# overrides) to regenerate the official baseline.
+GL_ROWS = int(os.environ.get("FINLINEAGE_GL_ROWS", "500"))
+PAYROLL_ROWS = int(os.environ.get("FINLINEAGE_PAYROLL_ROWS", "200"))
+if GL_ROWS != 500 or PAYROLL_ROWS != 200:
+    print(f"NOTE: using FINLINEAGE_GL_ROWS={GL_ROWS}, FINLINEAGE_PAYROLL_ROWS={PAYROLL_ROWS} "
+          "(not the default 500/200) — scale-test data, not the reproducible baseline. "
+          "Re-run with no overrides afterward to restore the official dataset.")
 
 BRONZE = Path(__file__).resolve().parent.parent / "data" / "bronze"
 BRONZE.mkdir(parents=True, exist_ok=True)
@@ -135,7 +159,7 @@ def write_csv(rows, filename):
 
 if __name__ == "__main__":
     print(f"Generating simulated source data into {BRONZE}\n")
-    write_csv(gen_fx_rates(),         "fx_rates.csv")
-    write_csv(gen_erp_entries(500),   "erp_gl_entries.csv")
-    write_csv(gen_payroll_entries(200), "payroll_entries.csv")
+    write_csv(gen_fx_rates(),                       "fx_rates.csv")
+    write_csv(gen_erp_entries(GL_ROWS),              "erp_gl_entries.csv")
+    write_csv(gen_payroll_entries(PAYROLL_ROWS),     "payroll_entries.csv")
     print("\nDone.")

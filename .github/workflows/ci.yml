@@ -5,6 +5,11 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  # Wk16 E2E job below only runs on these two triggers, deliberately never
+  # on push/pull_request — see that job's comment for why.
+  workflow_dispatch: {}
+  schedule:
+    - cron: '0 3 * * 1'  # Mondays 03:00 UTC
 
 jobs:
   dbt-build-and-test:
@@ -72,11 +77,6 @@ jobs:
           print('RECONCILIATION PASSED')
           "
 
-  # publishes dbt's auto-generated lineage/docs site.
-  # Only runs on an actual push to main (not on PRs), after the build+test job
-  # above has already passed. Needs a one-time manual step in this repo:
-  # Settings -> Pages -> Source = "GitHub Actions" (can't be set via a workflow
-  # file, so this is on you to flip once).
   deploy-docs:
     needs: dbt-build-and-test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -136,3 +136,67 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # Wk16 — full Docker/Airflow E2E suite (tests/test_e2e_pipeline.py).
+  #
+  # Deliberately NOT on every push/PR: ai1/ai2/ai3/ai4 share Gemini's
+  # 20-requests/day free-tier quota with your own local runs on the same
+  # Google Cloud project key (see FINLINEAGE_PROJECT_KNOWLEDGE_BASE_1.md
+  # Section 7.4 — this is the same quota that was fully exhausted live on
+  # 2026-09-02). Running this job on every commit would compete with your
+  # own local testing for that one shared daily budget and could exhaust it
+  # before you get to test yourself. Trigger it by hand from the Actions
+  # tab (Run workflow) whenever you want fresh E2E evidence, or let the
+  # weekly schedule above produce it automatically. The lighter
+  # dbt-build-and-test job above still runs on every push, same as before.
+  e2e-docker-airflow:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install pytest requests duckdb pandas
+
+      # Values come from repo secrets (Settings -> Secrets and variables ->
+      # Actions). GEMINI_API_KEY / GROQ_API_KEY / LITELLM_MASTER_KEY are
+      # required for ai1-ai4 to have any chance of succeeding here; the
+      # DATABRICKS_* ones are optional — if unset, sync_gold_to_databricks
+      # legitimately fails and the suite's
+      # test_external_service_task_succeeds_or_is_unconfigured test treats
+      # that as expected, not a failure.
+      - name: Write .env for docker-compose
+        run: |
+          cat > .env << EOF
+          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+          LITELLM_MASTER_KEY=${{ secrets.LITELLM_MASTER_KEY }}
+          LITELLM_BASE_URL=http://localhost:4000
+          DATABRICKS_SERVER_HOSTNAME=${{ secrets.DATABRICKS_SERVER_HOSTNAME }}
+          DATABRICKS_HTTP_PATH=${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_ACCESS_TOKEN=${{ secrets.DATABRICKS_ACCESS_TOKEN }}
+          DATABRICKS_CATALOG=${{ secrets.DATABRICKS_CATALOG }}
+          DATABRICKS_SCHEMA=${{ secrets.DATABRICKS_SCHEMA }}
+          EOF
+
+      - name: Bring up the docker-compose stack
+        run: docker compose up -d --build
+
+      - name: Run the E2E pytest suite
+        env:
+          E2E_TEARDOWN: "1"
+          E2E_DAG_TIMEOUT_S: "1500"
+        run: pytest tests/ -v
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down
