@@ -141,18 +141,37 @@ def test_ai6_doc_drift_reports_no_stale_docs(dag_run, duckdb_conn):
     assert df.empty, f"Unexpected doc drift this run: {df.to_dict('records')}"
 
 
-def test_narrative_headline_snippet_is_bounded(dag_run, duckdb_conn):
-    """Covers the Wk15 AI-1-to-BI-card feature: when ai1 succeeds, it must
-    have written a fresh, word-bounded headline row that Power BI can bind
-    a card to."""
+@pytest.mark.parametrize("snippet_type,best_effort", [
+    ("pnl_executive_headline", False),
+    ("revenue_trends_headline", True),
+    ("cost_analysis_headline", True),
+    ("variance_volatility_headline", True),
+    ("variance_stability_headline", True),
+])
+def test_narrative_headline_snippet_is_bounded(dag_run, duckdb_conn, snippet_type, best_effort):
+    """Covers the Wk15/16 AI-1-to-BI-card feature (5 cards total: P&L Summary,
+    Revenue Trends, Cost Analysis, and 2 on Variance Analysis).
+    pnl_executive_headline rides the same LLM call as the main P&L narrative,
+    so it's hard-required whenever ai1_pnl_narrative succeeds. The other 4 are
+    each a separate, independent Gemini call inside that same task,
+    deliberately wrapped as best-effort against the shared 20-requests/day
+    quota (see run_ai1_revenue_headline()'s docstring, and its
+    run_ai1_cost_headline() / run_ai1_variance_volatility_headline() /
+    run_ai1_variance_stability_headline() siblings) — each row can
+    legitimately be missing even on a successful ai1 run, so each is
+    soft-checked: verified word-bounded when present, skipped rather than
+    failed when absent."""
     if get_task_state(dag_run["dag_run_id"], "ai1_pnl_narrative") != "success":
         pytest.skip("ai1_pnl_narrative did not succeed this run (quota) — no fresh headline expected")
     row = duckdb_conn.execute("""
         SELECT snippet_text, word_count FROM ai_narrative_snippets
-        WHERE snippet_type = 'pnl_executive_headline'
+        WHERE snippet_type = ?
         ORDER BY generated_at DESC LIMIT 1
-    """).fetchone()
-    assert row is not None, "ai1 succeeded but no pnl_executive_headline row was written"
+    """, [snippet_type]).fetchone()
+    if row is None and best_effort:
+        pytest.skip(f"{snippet_type} row not found — its generation is a best-effort second "
+                     "LLM call and may have been skipped on Gemini/Groq quota exhaustion")
+    assert row is not None, f"ai1_pnl_narrative succeeded but no {snippet_type} row was written"
     snippet_text, word_count = row
-    assert word_count <= 25, f"headline word_count={word_count} exceeds the 25-word bound"
+    assert word_count <= 25, f"{snippet_type} word_count={word_count} exceeds the 25-word bound"
     assert word_count == len(snippet_text.split()), "stored word_count doesn't match snippet_text"

@@ -1,11 +1,9 @@
 """
 scripts/sync_gold_to_databricks.py — Databricks integration (Phase 2, Wk 11)
 
-Pushes the 5 Gold mart tables, plus the ai_narrative_snippets table (added
-Wk 15, 2026-09-03 — see ai_narrative_snippets_schema.sql), from local DuckDB
-into a Databricks SQL warehouse as Delta tables, so the same governed marts
-this project already builds are queryable from Databricks too. This does NOT
-replace DuckDB —
+Pushes the 5 Gold mart tables from local DuckDB into a Databricks SQL
+warehouse as Delta tables, so the same governed marts this project already
+builds are queryable from Databricks too. This does NOT replace DuckDB —
 DuckDB stays the pipeline's own execution engine; this is a one-way sync of
 the finished marts outward, run after dbt build (and, in Docker, after the
 GE post-gates pass).
@@ -47,10 +45,13 @@ MARTS = [
     "mart_cost_analysis",
     "mart_variance_analysis",
     "mart_metric_dictionary",
-    # Not a dbt mart — AI-1's bounded card-headline output (Wk 15). Reuses
-    # this same sync mechanism (name-a-table-and-it-ships) rather than
-    # writing a second sync path just because its source is an AI chain
-    # instead of dbt.
+    # Not a dbt mart, but Power BI's AI headline cards (Wk 15/16) now read
+    # this table live from Databricks (finlineage_gold.ai_narrative_snippets),
+    # same as the 5 marts above — mirrors the equivalent fix already made in
+    # export_marts_to_csv.py. Without this, the Databricks copy of this table
+    # never gets a fresh row, so Power BI's Refresh always re-pulls the same
+    # stale snapshot no matter how many new headlines ai1_pnl_narrative.py
+    # writes to local DuckDB. Added 2026-09-03.
     "ai_narrative_snippets",
 ]
 

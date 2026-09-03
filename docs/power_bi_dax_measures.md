@@ -151,6 +151,163 @@ Card visual on the P&L Summary page (replacing the static "Enterprise drives
 one new `CALCULATE(... snippet_type = "...")` measure each, added one BI
 card at a time as agreed.
 
+### Revenue Trends card (Wk 15/16, added 2026-09-03 — second increment)
+
+`ai1_pnl_narrative.py` now also makes a small second Gemini call
+(`run_ai1_revenue_headline()`) reading `mart_revenue_trends`, writing
+`snippet_type='revenue_trends_headline'` to the same table. Same
+latest-row-per-type pattern as the P&L measure above, just a different
+`snippet_type` filter:
+
+```dax
+Revenue Trends Executive Headline =
+VAR LatestTime =
+    CALCULATE (
+        MAX ( ai_narrative_snippets[generated_at] ),
+        ai_narrative_snippets[snippet_type] = "revenue_trends_headline"
+    )
+RETURN
+    CALCULATE (
+        SELECTEDVALUE ( ai_narrative_snippets[snippet_text] ),
+        ai_narrative_snippets[snippet_type] = "revenue_trends_headline",
+        ai_narrative_snippets[generated_at] = LatestTime
+    )
+```
+
+Add this measure the same way (right-click `ai_narrative_snippets` in the
+**Fields** pane → **New measure** → paste → Enter), then drop it into a Card
+visual on the Revenue Trends page, replacing the static "Enterprise drives
+90%+ with MidMarket showing high MoM volatility" insight text called out in
+the Mid-Term doc's EV-12.
+
+**One real difference from the P&L card, worth knowing before you rely on
+it:** unlike the P&L headline (same LLM call as the full narrative, so it's
+as reliable as `ai1_pnl_narrative` succeeding at all), this one is a
+second, independent Gemini call inside the same task, wrapped as
+best-effort/non-fatal against the 20-requests/day shared quota — see that
+function's docstring in `ai_chains/ai1_pnl_narrative.py`. If it hits the
+quota on a given run, the card simply keeps showing the last successfully
+generated headline rather than going blank or erroring the visual.
+
+**Two real bugs hit and fixed getting this card live (2026-09-03), worth
+knowing if the card ever goes blank again:**
+
+1. `scripts/sync_gold_to_databricks.py`'s `MARTS` list never included
+   `ai_narrative_snippets` — this .pbix's `ai_narrative_snippets` query
+   reads from Databricks (`workspace.finlineage_gold.ai_narrative_snippets`),
+   same as the 5 real marts, so any new headline written to local DuckDB
+   never reached the copy Power BI was reading no matter how many times you
+   refreshed. Fixed by adding it to that script's `MARTS` list, mirroring
+   the identical fix already made in `export_marts_to_csv.py`.
+2. Running Power Query's **Start Diagnostics** tool against the
+   `ai_narrative_snippets` query left 4 permanent `Diagnostics` queries
+   (`..._Counters`, `..._Detailed_`, `..._Aggregated_`, `..._Partition_`)
+   saved into the .pbix. Because a diagnostics query's job is to capture the
+   evaluation trace of the query it profiled, its mere presence in the model
+   made Power BI's engine detect a cyclic reference and block refresh for
+   every query sharing that Databricks connection (6 queries, not just this
+   one) — visible as `Refresh → "A cyclic reference was encountered during
+   evaluation"` on `ai_narrative_snippets`. Fixed by deleting all 4
+   diagnostics queries from the Queries pane. If diagnostics are ever run
+   again for troubleshooting, delete the resulting queries afterwards rather
+   than leaving them in the saved file.
+
+**Repeatable refresh pattern for the demo**, proven working end-to-end:
+`python ai_chains/ai1_pnl_narrative.py` (generates both headlines) →
+`python scripts/sync_gold_to_databricks.py` (pushes the fresh
+`ai_narrative_snippets` rows to Databricks, same as the 5 marts) → Power BI
+Desktop **Home → Refresh**. Verified live: the Revenue Trends card now shows
+"Enterprise drives revenue, contributing over 80% each month, peaking at
+₹48.77 Cr in April." — a real, dynamically generated headline, not the
+static Mid-Term text box.
+
+### Cost Analysis card (Wk 15/16, added 2026-09-03 — third increment)
+
+```dax
+Cost Analysis Executive Headline =
+VAR LatestTime =
+    CALCULATE (
+        MAX ( ai_narrative_snippets[generated_at] ),
+        ai_narrative_snippets[snippet_type] = "cost_analysis_headline"
+    )
+RETURN
+    CALCULATE (
+        SELECTEDVALUE ( ai_narrative_snippets[snippet_text] ),
+        ai_narrative_snippets[snippet_type] = "cost_analysis_headline",
+        ai_narrative_snippets[generated_at] = LatestTime
+    )
+```
+
+Drop into a Card visual on the Cost Analysis page.
+
+### Variance Analysis cards — 2 (Wk 15/16, added 2026-09-03 — fourth/fifth increment)
+
+Two cards, replacing the two static insight text boxes the page shipped
+with ("Mid Market shows extreme volatility..." and "Enterprise and Internal
+segments show moderate but consistent variances."):
+
+```dax
+Variance Volatility Headline =
+VAR LatestTime =
+    CALCULATE (
+        MAX ( ai_narrative_snippets[generated_at] ),
+        ai_narrative_snippets[snippet_type] = "variance_volatility_headline"
+    )
+RETURN
+    CALCULATE (
+        SELECTEDVALUE ( ai_narrative_snippets[snippet_text] ),
+        ai_narrative_snippets[snippet_type] = "variance_volatility_headline",
+        ai_narrative_snippets[generated_at] = LatestTime
+    )
+
+Variance Stability Headline =
+VAR LatestTime =
+    CALCULATE (
+        MAX ( ai_narrative_snippets[generated_at] ),
+        ai_narrative_snippets[snippet_type] = "variance_stability_headline"
+    )
+RETURN
+    CALCULATE (
+        SELECTEDVALUE ( ai_narrative_snippets[snippet_text] ),
+        ai_narrative_snippets[snippet_type] = "variance_stability_headline",
+        ai_narrative_snippets[generated_at] = LatestTime
+    )
+```
+
+`Variance Volatility Headline` replaces the "Mid Market..." box, `Variance
+Stability Headline` replaces the "Enterprise and Internal..." box — both as
+Card visuals in the same positions.
+
+### Pipeline & AI Operations Status page (Wk 15/16, added 2026-09-03)
+
+The 5th page (previously a raw `ai_narrative_snippets` table dump plus a
+"Last Refreshed" card) is repurposed into one consolidated status view:
+the existing "Last Refreshed" card (bound to `MAX(_pipeline_sync_log[synced_at])`)
+stays, and the raw table is replaced with a table visual filtered to the
+*latest row per snippet_type only* — 5 rows (one per card headline) instead
+of every historical row ever generated:
+
+```dax
+Is Latest Snippet Per Type =
+VAR ThisType = ai_narrative_snippets[snippet_type]
+VAR ThisTime = ai_narrative_snippets[generated_at]
+VAR LatestForType =
+    CALCULATE (
+        MAX ( ai_narrative_snippets[generated_at] ),
+        ALLEXCEPT ( ai_narrative_snippets, ai_narrative_snippets[snippet_type] )
+    )
+RETURN
+    ThisTime = LatestForType
+```
+
+Add this as a calculated column on `ai_narrative_snippets`, then on the
+table visual: Filters pane → drag `Is Latest Snippet Per Type` into
+Filters on this visual → set to `is true`. Columns to show: `snippet_type`,
+`snippet_text`, `generated_at`. Optionally add a second card for
+`Total rows synced` (`SUM(_pipeline_sync_log[total_rows_synced])` for the
+latest `sync_run_id`) alongside "Last Refreshed" for a one-glance pipeline
+health summary.
+
 ## `is_material_variance` — not a measure
 
 It's already a boolean column on `mart_variance_analysis`, meant for

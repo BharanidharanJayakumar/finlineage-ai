@@ -16,6 +16,13 @@ MARTS = [
     "mart_cost_analysis",
     "mart_variance_analysis",
     "mart_metric_dictionary",
+    # Not a dbt mart, but Power BI's AI headline cards (Wk 15/16) read it the
+    # same way as everything else in this .pbix — via a CSV in data/gold/,
+    # not a live DuckDB connection. Added 2026-09-03 after the Revenue
+    # Trends card's new row didn't show up in Power BI: this script never
+    # exported the table, so the .pbix's copy was stale from whenever it was
+    # first loaded. Every future run of this script now keeps it current.
+    "ai_narrative_snippets",
 ]
 
 def export():
