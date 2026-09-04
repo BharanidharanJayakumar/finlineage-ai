@@ -73,9 +73,16 @@ def test_score_claim_routes_to_human_review_in_the_middle_band(monkeypatch):
 
 def test_run_ai3_v2_writes_scored_claims_to_review_queue(writable_db, tmp_path, monkeypatch):
     monkeypatch.setattr(ai3v2, "DB_PATH", writable_db)
+    # Ground the claim in whatever figure is ACTUALLY in this db copy (baseline
+    # or scaled) rather than a hardcoded "48.77 Cr" — retrieval_grounding_score()
+    # checks the claimed number against the real mart_pnl_summary rows, so a
+    # hardcoded figure silently breaks the moment the real data changes (e.g.
+    # after running scripts/scale_test.py without restoring the baseline).
+    pnl_df = ai3v2.get_pnl_data()
+    row = pnl_df.iloc[0]
     narrative_path = tmp_path / "pnl_narrative.md"
     narrative_path.write_text(
-        "Overall performance was strong. Revenue reached 48.77 Cr in April.",
+        f"Overall performance was strong. Revenue reached {row['revenue_cr']} Cr in the period.",
         encoding="utf-8",
     )
     monkeypatch.setattr(ai3v2, "NARRATIVE_PATH", narrative_path)

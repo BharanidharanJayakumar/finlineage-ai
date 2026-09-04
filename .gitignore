@@ -12,3 +12,6 @@ logs/
 *.pbix
 finlineage/.user.yml
 data/synthetic_anomaly_test/
+.coverage
+*.docx
+*.pdf
